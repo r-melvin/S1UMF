@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Missing member / MissingMethodException / "unresolved" in the Polyfill report
+    url: https://github.com/DooDesch-Mods/ScheduleOne-Polyfill/issues
+    about: A member the game update renamed or removed is a Polyfill bridge - report it on Polyfill.
+  - name: The problem stays without S1UMF installed
+    url: https://github.com/r-melvin/S1UMF/blob/main/CONTRIBUTING.md#before-you-open-anything
+    about: Then it belongs to that mod's author. Please report it on their page.

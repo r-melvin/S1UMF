@@ -1,0 +1,70 @@
+name: Bug with a S1UMF fix
+description: A fix misbehaves, a mod S1UMF fixes still breaks, or S1UMF causes a problem.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please read [CONTRIBUTING.md](https://github.com/r-melvin/S1UMF/blob/main/CONTRIBUTING.md) first.
+        Issues without a log, or without the latest Polyfill, are closed.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: The problem goes away when I remove S1UMF.dll (or S1UMF is the cause)
+          required: true
+        - label: My log shows "[Polyfill <version>] has the fixes S1UMF relies on"
+          required: true
+        - label: I searched existing issues
+          required: true
+  - type: input
+    id: game
+    attributes:
+      label: Schedule I version and branch
+      placeholder: 0.4.7f7, Steam beta, IL2CPP
+    validations:
+      required: true
+  - type: input
+    id: s1umf
+    attributes:
+      label: S1UMF version and Polyfill line
+      placeholder: "S1UMF 0.1.0; [Polyfill 0.13.0] has the fixes S1UMF relies on"
+    validations:
+      required: true
+  - type: input
+    id: mod
+    attributes:
+      label: The mod involved, exactly as its load line says
+      placeholder: K9 Patrol v1.1.0
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: MelonLoader version and OS
+      placeholder: MelonLoader 0.7.3, Windows 11 / Linux + Proton 10
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what happened instead. Steps if it reproduces.
+    validations:
+      required: true
+  - type: textarea
+    id: s1umf-lines
+    attributes:
+      label: S1UMF's lines from the log
+      description: Every line containing [S1UMF], from start-up to the problem.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Full log
+      description: Drag MelonLoader/Latest.log into this box as a file attachment.
+    validations:
+      required: true

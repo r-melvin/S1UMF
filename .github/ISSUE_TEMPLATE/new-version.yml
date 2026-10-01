@@ -1,0 +1,23 @@
+name: A fix stands down on a newer mod version
+description: The log says "standing down" for a mod you have updated.
+labels: [new version]
+body:
+  - type: input
+    id: line
+    attributes:
+      label: The standing-down line
+      placeholder: "[S1UMF] [MoreGuns] is 1.6.7, fix was written for 1.6.6 - standing down"
+    validations:
+      required: true
+  - type: dropdown
+    id: still
+    attributes:
+      label: Does the original problem still happen on the new version?
+      options: ["Yes - here is the error from the log", "No - the author fixed it", "Not sure"]
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Error lines from the log on the new version (if it still happens)
+      render: text

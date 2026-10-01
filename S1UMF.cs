@@ -44,7 +44,6 @@ namespace S1UMF
                   nameof(K9RequestPath), "dogs stuck with a path that never finishes computing");
             Apply("MoreGuns", "1.6.6", "MoreGuns.Patches.Equippalbe_RangedWeaponPatch", "Postfix",
                   nameof(MoreGunsAutoFire), "automatic fire from a left click still held when the gun came out");
-            ApplyBehaviourOwnership();
             ApplyIntegerItemUI();
             ApplyCustomerSelector();
             ApplyTypeSweepGuards();
@@ -804,84 +803,6 @@ namespace S1UMF
                 _gameTypeNames = names;
             }
             return _gameTypeNames.TryGetValue(name, out var full) ? assembly.GetType(full, false) : null;
-        }
-
-        // ---------------------------------------------------------------- custom NPC behaviours (game 0.4.7f6)
-        //
-        // 0.4.7's ConsumeProductBehaviour.OnStartServer is base.OnStartServer(); Npc.OnNPCDeinitialized += ...,
-        // and Npc is beh.Npc - two references set only by GetComponentInParent in Awake (Behaviour.beh,
-        // NPCBehaviour.Npc). S1API repairs them on a custom NPC's prefab (RepairBehaviourOwnership), but they
-        // are not serialized, so an instance whose Awake ran before it was parented keeps a null. The NRE then
-        // aborts FishNet's SetupSceneObjects for every scene object after it, and the save never finishes
-        // loading - measured with The Big Pimpin 1.0.11's NPCs. Repair the two references before the method
-        // runs, the way the game's own Awake would have; if an NPC still cannot be found, contain the one
-        // exception (base.OnStartServer has run; only one deinitialize subscription is lost) instead of the load.
-
-        private static int _ownershipRepairs, _ownershipContained;
-
-        private void ApplyBehaviourOwnership()
-        {
-            const string what = "a custom NPC's product behaviour with no NPC aborts loading (0.4.7f6)";
-            if (!GameFits())
-            {
-                LoggerInstance.Msg($"[game] is {Application.version}, fix for {what} was written for 0.4.7f6-f7 - standing down");
-                return;
-            }
-            try
-            {
-                var target = AccessTools.Method(typeof(Il2CppScheduleOne.NPCs.Behaviour.ConsumeProductBehaviour), "OnStartServer");
-                if (target == null) { LoggerInstance.Warning($"[game] ConsumeProductBehaviour.OnStartServer not found - fix for {what} not applied"); return; }
-                HarmonyInstance.Patch(target,
-                    prefix: new HarmonyMethod(typeof(Mod), nameof(RepairOwnership)),
-                    finalizer: new HarmonyMethod(typeof(Mod), nameof(ContainOwnership)));
-                LoggerInstance.Msg($"[game {Application.version}] fixed: {what}");
-            }
-            catch (Exception e)
-            {
-                LoggerInstance.Warning($"[game] could not apply fix for {what}: {e.Message}");
-            }
-        }
-
-        private static void RepairOwnership(Il2CppScheduleOne.NPCs.Behaviour.ConsumeProductBehaviour __instance)
-        {
-            try
-            {
-                if (__instance == null) return;
-                var owner = __instance.beh;
-                if (owner == null)
-                {
-                    owner = __instance.GetComponentInParent<Il2CppScheduleOne.NPCs.Behaviour.NPCBehaviour>(true);
-                    if (owner != null) __instance.beh = owner;
-                }
-                if (owner != null && owner.Npc == null)
-                {
-                    var npc = owner.GetComponentInParent<Il2CppScheduleOne.NPCs.NPC>(true);
-                    if (npc != null)
-                    {
-                        owner.Npc = npc;
-                        if (_ownershipRepairs++ < 20)
-                            MelonLogger.Msg($"[S1UMF] repaired behaviour ownership for NPC '{npc.ID}' ({__instance.gameObject.name})");
-                    }
-                }
-            }
-            catch { }
-        }
-
-        private static Exception ContainOwnership(Exception __exception, Il2CppScheduleOne.NPCs.Behaviour.ConsumeProductBehaviour __instance)
-        {
-            if (__exception == null) return null;
-            string path = "?";
-            try
-            {
-                // Full hierarchy and scene: which object this is decides whose bug it is.
-                var parts = new System.Collections.Generic.List<string>();
-                for (var t = __instance.transform; t != null; t = t.parent) parts.Insert(0, t.name);
-                path = string.Join("/", parts) + " [scene " + __instance.gameObject.scene.name + "]";
-            }
-            catch { }
-            if (_ownershipContained++ < 20)
-                MelonLogger.Warning($"[S1UMF] contained OnStartServer failure on {path} (no NPC found); loading continues: {__exception.Message}");
-            return null;
         }
 
         // ---------------------------------------------------------------- Game 0.4.7f6: IntegerItemUI

@@ -56,6 +56,7 @@ namespace S1UMF
                   nameof(MinimapWithoutPhone), "a warning every 2 seconds at the main menu, where there is no phone");
             ApplyHererMinimapLayering();
             ApplyBigPimpin();
+            ApplyBigPimpinEscorts();
             ApplyTemplateNpcId();
             RequirePolyfill();
 #if S1UMF_DEV
@@ -162,6 +163,181 @@ namespace S1UMF
             {
                 LoggerInstance.Warning($"[BigPimpin] could not apply fix for {what}: {e.Message}");
             }
+        }
+
+        // ---------------------------------------------------------------- The Big Pimpin 1.0.11: its escorts
+        //
+        // EscortNPCRegistry.EnsureSlots() builds the four escort NPCs itself with `new`, from the Main-scene callback
+        // (ResetForSceneReload), instead of letting S1API own them. S1API also makes one of each type on the server,
+        // so the first load of a session has two of every escort (seen in runs: two "Mercedes" under @Managers/@NPCs).
+        // On a later load the mod builds them before the server is up, S1API adopts that instance, and it has lost its
+        // NetworkObject, so its spawn fails. Then HideAll() releases the old display leases after the new escorts
+        // exist, and each release hides the new, unspawned one by its reused ID, which switches its avatar off and
+        // S1API refuses the spawn. S1API's maintainer asked for the fix here rather than in S1API (ifBars/S1API#338,
+        // #339). So:
+        //  - EnsureSlots waits until the save has loaded with the server running (a client: until the server's escorts
+        //    have had time to arrive), leaving the slots empty; the mod's own later EnsureSlots calls (AcquireLease)
+        //    fill them. Then it uses the instances S1API made (S1API.Entities.NPC.All) if there are any, so nothing
+        //    is built twice. If S1API made none (a released S1API whose NPC discovery skips mods built against an
+        //    older S1API, ifBars/S1API#333), the mod builds its own, now safely: on a running server S1API keeps the
+        //    NetworkObject and queues the spawn.
+        //  - ResetForSceneReload releases the old leases first, while their IDs still resolve to nothing.
+        //  - HideAtHiddenPosition on an escort that has not spawned yet waits for the spawn and then hides it, so the
+        //    requested hide is kept, not dropped.
+        // It needs an S1API whose NPC discovery finds Big Pimpin (ifBars/S1API#333, after 3.2.1-beta.7): only then does
+        // S1API spawn its escorts. 3.2.1-beta.7 never spawns them on a first load and refuses them on a reload, with or
+        // without this fix (measured), so on that S1API the fix stands down and leaves the mod as it is.
+
+        private static readonly string[] EscortTypes =
+        {
+            "bigpimpin.NPC.EscortMidnightStreetNPC", "bigpimpin.NPC.EscortMidnightMadamNPC",
+            "bigpimpin.NPC.EscortMidnightExecutiveNPC", "bigpimpin.NPC.EscortMidnightPresidentialNPC",
+        };
+        private static Type[] _escortTypes;
+        private static IList _bpSlots;
+        private static IDictionary _bpSlotsByLocation, _bpActiveBySlot;
+        private static PropertyInfo _bpLocationId, _bpSlotId;
+        private static MethodInfo _bpHideAll, _bpHide;
+        private static FieldInfo _s1apiNpcAll;
+        private static float _mainLoadedAt = -1f;
+        private static bool _escortFallbackLogged, _bpHideBypass;
+
+        private void ApplyBigPimpinEscorts()
+        {
+            const string what = "escorts built twice, or not spawned after a reload (escort construction and hiding)";
+            var melon = Gate("BigPimpin", "1.0.11", what);
+            if (melon == null) return;
+            try
+            {
+                var asm = melon.MelonAssembly.Assembly;
+                _escortTypes = EscortTypes.Select(n => asm.GetType(n, false)).ToArray();
+                var registry = asm.GetType("bigpimpin.NPC.EscortNPCRegistry", false);
+                var slotBase = asm.GetType("bigpimpin.NPC.EscortSlotBase", false);
+                var display = asm.GetType("bigpimpin.NPC.EscortLocationDisplayController", false);
+                var npcType = AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetType("S1API.Entities.NPC", false)).FirstOrDefault(t => t != null);
+                // #333 added ReflectionUtils.ReferenceBindsToDefinition; its absence means discovery skips Big Pimpin.
+                var discovery = npcType?.Assembly.GetType("S1API.Internal.Utils.ReflectionUtils", false);
+                if (npcType != null && (discovery == null || AccessTools.Method(discovery, "ReferenceBindsToDefinition") == null))
+                {
+                    LoggerInstance.Msg($"[BigPimpin] fix for {what} needs an S1API newer than 3.2.1-beta.7 (ifBars/S1API#333), which this one isn't - standing down");
+                    return;
+                }
+                _bpSlots = registry == null ? null : AccessTools.Field(registry, "_slots")?.GetValue(null) as IList;
+                _bpSlotsByLocation = registry == null ? null : AccessTools.Field(registry, "_slotsByLocation")?.GetValue(null) as IDictionary;
+                _bpActiveBySlot = registry == null ? null : AccessTools.Field(registry, "_activeBySlot")?.GetValue(null) as IDictionary;
+                _bpLocationId = slotBase == null ? null : AccessTools.Property(slotBase, "LocationId");
+                _bpSlotId = slotBase == null ? null : AccessTools.Property(slotBase, "SlotId");
+                _bpHide = slotBase == null ? null : AccessTools.Method(slotBase, "HideAtHiddenPosition");
+                _bpHideAll = display == null ? null : AccessTools.Method(display, "HideAll");
+                _s1apiNpcAll = npcType == null ? null : AccessTools.Field(npcType, "All");
+                var ensure = registry == null ? null : AccessTools.Method(registry, "EnsureSlots");
+                var reset = registry == null ? null : AccessTools.Method(registry, "ResetForSceneReload");
+                if (_escortTypes.Any(t => t == null) || _bpSlots == null || _bpSlotsByLocation == null || _bpActiveBySlot == null || _bpLocationId == null
+                    || _bpSlotId == null || _bpHide == null || _bpHideAll == null || _s1apiNpcAll == null || ensure == null || reset == null)
+                {
+                    LoggerInstance.Warning($"[BigPimpin] fix for {what} not applied: a member it needs is missing");
+                    return;
+                }
+                HarmonyInstance.Patch(ensure, prefix: new HarmonyMethod(typeof(Mod), nameof(AdoptEscorts)));
+                HarmonyInstance.Patch(reset, prefix: new HarmonyMethod(typeof(Mod), nameof(ReleaseLeasesFirst)));
+                HarmonyInstance.Patch(_bpHide, prefix: new HarmonyMethod(typeof(Mod), nameof(HideWhenSpawned)));
+                LoggerInstance.Msg($"[BigPimpin 1.0.11] fixed: {what}");
+            }
+            catch (Exception e)
+            {
+                LoggerInstance.Warning($"[BigPimpin] could not apply fix for {what}: {e.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Fills the mod's escort slots once it is safe: S1API's own instances if it made them, else the mod builds its
+        /// own. False skips the mod's construction (for now, or for good when adopted).
+        /// </summary>
+        private static bool AdoptEscorts()
+        {
+            try
+            {
+                if (_bpSlots.Count > 0) return false;
+                if (!Singleton<LoadManager>.InstanceExists || !Singleton<LoadManager>.Instance.IsGameLoaded) return false;
+                bool server = Il2CppFishNet.InstanceFinder.IsServer;
+                if (!server && !Il2CppFishNet.InstanceFinder.IsClient) return false;      // the network is not up yet
+                if (_mainLoadedAt < 0f) _mainLoadedAt = Time.realtimeSinceStartup;
+
+                var found = new object[_escortTypes.Length];
+                foreach (var npc in (IEnumerable)_s1apiNpcAll.GetValue(null))
+                    for (int i = 0; i < _escortTypes.Length; i++)
+                        if (npc != null && found[i] == null && npc.GetType() == _escortTypes[i]) found[i] = npc;
+
+                if (found.All(f => f != null))
+                {
+                    foreach (var slot in found) AddSlot(slot);
+                    MelonLogger.Msg("[S1UMF] Big Pimpin's escorts use S1API's own instances");
+                    return false;
+                }
+                if (found.Any(f => f != null))
+                    MelonLogger.Warning($"[S1UMF] S1API made {found.Count(f => f != null)} of Big Pimpin's 4 escorts; letting the mod build them");
+                // A client waits a little for the server's escorts to reach it before building its own.
+                if (!server && Time.realtimeSinceStartup - _mainLoadedAt < 30f) return false;
+                if (!_escortFallbackLogged)
+                {
+                    _escortFallbackLogged = true;
+                    MelonLogger.Msg($"[S1UMF] S1API made no escorts; Big Pimpin builds its own now that the {(server ? "server" : "client")} is running");
+                }
+                return true;
+            }
+            catch (Exception e)
+            {
+                MelonLogger.Warning($"[S1UMF] escort adoption failed, letting the mod build its own: {e.Message}");
+                return true;
+            }
+        }
+
+        private static void AddSlot(object slot)
+        {
+            _bpSlots.Add(slot);
+            if (!(_bpLocationId.GetValue(slot) is string location) || string.IsNullOrWhiteSpace(location)) return;
+            if (!(_bpSlotsByLocation[location] is IList list))
+            {
+                list = (IList)Activator.CreateInstance(typeof(System.Collections.Generic.List<>).MakeGenericType(_bpSlots.GetType().GetGenericArguments()[0]));
+                _bpSlotsByLocation[location] = list;
+            }
+            list.Add(slot);
+        }
+
+        /// <summary>Releases the previous scene's display leases before the slots are rebuilt.</summary>
+        private static void ReleaseLeasesFirst()
+        {
+            _mainLoadedAt = Time.realtimeSinceStartup;
+            _escortFallbackLogged = false;
+            try { _bpHideAll.Invoke(null, null); } catch (Exception e) { MelonLogger.Warning($"[S1UMF] releasing escort leases failed: {e.Message}"); }
+        }
+
+        /// <summary>A hide on an escort that has not spawned yet happens once it has; false skips it for now.</summary>
+        private static bool HideWhenSpawned(object __instance, ref Vector3 __result)
+        {
+            if (_bpHideBypass) return true;
+            try
+            {
+                var npc = Il2CppScheduleOne.NPCs.NPCManager.GetNPC(_bpSlotId.GetValue(__instance) as string);
+                var net = npc == null ? null : npc.GetComponent<Il2CppFishNet.Object.NetworkObject>();
+                if (net == null || net.IsSpawned) return true;
+                __result = new Vector3(0f, -2000f, 0f);          // EscortSlotBase.HiddenPos, what the method returns
+                MelonCoroutines.Start(HideOnceSpawned(__instance, net));
+                return false;
+            }
+            catch { return true; }
+        }
+
+        private static IEnumerator HideOnceSpawned(object slot, Il2CppFishNet.Object.NetworkObject net)
+        {
+            float until = Time.realtimeSinceStartup + 120f;
+            while (net != null && !net.IsSpawned && Time.realtimeSinceStartup < until) yield return null;
+            if (net == null || !net.IsSpawned) yield break;     // never spawned: nothing to hide
+            if (_bpActiveBySlot.Contains(slot)) yield break;    // leased again since: it is meant to be shown now
+            _bpHideBypass = true;
+            try { _bpHide.Invoke(slot, null); }
+            catch (Exception e) { MelonLogger.Warning($"[S1UMF] deferred escort hide failed: {e.Message}"); }
+            finally { _bpHideBypass = false; }
         }
 
         private static bool EscortHandover(Il2CppScheduleOne.Quests.Contract contract,

@@ -158,6 +158,11 @@ Production Expansion Reborn 1.0.2B, ProductManager 2.4, RV Repair Van 2.6.2, S1A
 Handlers 1.0.0, Smart Slot Filter 1.1.0, SmartRestock 1.3.3, StackPro 1.1.1, TightBeam 2.1.1, Trash
 Recycler 1.0.0, Worker Collision Reborn 1.0.0.
 
+Since then, the two BFG mods' 0.4.7 releases, **BFG Better Supplier 1.6.7** and **BFG Smart Deal Location
+2.4.7**, loaded a save with S1UMF 0.1.0, Polyfill 0.13.0 and the rest of the set above on 0.4.7f7 IL2CPP: Polyfill
+reports nothing missing for either (1.6.5 and 2.4.5 had 3 and 1), and neither logs an error. Neither needed an
+S1UMF fix.
+
 **Also run with earlier builds of S1UMF** (on 0.4.7f6), since removed from this setup by choice
 rather than for problems: Advanced Dealer 1.4.9, Auto Sprinkler And Soil Pourer, BankingApp 1.3.1, Custom
 Commands Framework 1.1.3, Enhanced ATM 1.0.2, FasterDealers 3.0.0, Graffiti Unlimited 1.1.4, Hire Me
